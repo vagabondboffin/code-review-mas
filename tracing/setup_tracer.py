@@ -7,17 +7,17 @@ from opentelemetry.sdk.trace.export import (
 
 
 def setup_tracer():
-    # Create tracer provider
+    # Tracer provider
     provider = TracerProvider()
 
-    # Create console exporter (we'll use Jaeger later)
+    # Console exporter (we'll use Jaeger later)
     exporter = ConsoleSpanExporter()
 
     # Add processor to the provider
     processor = SimpleSpanProcessor(exporter)
     provider.add_span_processor(processor)
 
-    # Set the global tracer provider
+    # The global tracer provider
     trace.set_tracer_provider(provider)
 
     return trace.get_tracer(__name__)
