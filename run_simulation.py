@@ -1,17 +1,34 @@
 from model import CodeReviewModel
 import pandas as pd
+import time
 from tracing.setup_tracer import tracer
+
+from llm.task_generator import TaskGenerator
+
 
 # Initialize model
 model = CodeReviewModel(num_coders=2, num_reviewers=1)
+task_gen = TaskGenerator()
 
-# Test with sample tasks
-tasks = [
-    "Implement user login with OAuth",
-    "Add payment processing system",
-    "Create user profile page with avatar upload",
-    "Fix security vulnerability"
-]
+# Generate tasks using LLM
+num_task = 2
+tasks = []
+print(f"Generating {num_task} tasks with LLM")
+for i in range(num_task):
+    with tracer.start_as_current_span("Task Generation") as span:
+        task = task_gen.generate_task()
+        tasks.append(task)
+        span.set_attribute("task.content", task)
+        print(f"Generated task {i+1}: {task}")
+    time.sleep(1)
+
+# # Test with sample tasks
+# tasks = [
+#     "Implement user login with OAuth",
+#     "Add payment processing system",
+#     "Create user profile page with avatar upload",
+#     "Fix security vulnerability"
+# ]
 
 print(f"Starting simulation with {len(tasks)} tasks...")
 results = []
