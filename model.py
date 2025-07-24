@@ -1,15 +1,25 @@
 from agents.coder import CoderAgent
 from agents.reviewer import ReviewerAgent
+from agents.planner import PlannerAgent
 from utils.similarity import SimilarityCalculator
 from tracing.setup_tracer import tracer
 import random
+import json
+import time
 
 
 class CodeReviewModel:
-    def __init__(self, num_coders=2, num_reviewers=1):
+    def __init__(self, num_coders=2, num_reviewers=1, num_planners=1):
         self.next_id = 0
         self.coders = []
         self.reviewers = []
+        self.planners = []
+
+        # Create planners (new)
+        for _ in range(num_planners):
+            agent = PlannerAgent(self.next_id, self)
+            self.planners.append(agent)
+            self.next_id += 1
 
         # Create coders
         for _ in range(num_coders):
@@ -51,45 +61,79 @@ class CodeReviewModel:
             span.set_attribute("task.synthetic_ambiguity", is_synthetic_ambiguity)
             span.set_attribute("task.natural_ambiguity", is_natural_ambiguity)
 
-            print(f"\nStarting task: {task}")
+            print(f"\nStarting main task: {task}")
             if is_synthetic_ambiguity or is_natural_ambiguity:
                 print(f"  !! Ambiguous task (sources: {', '.join(error_sources)})")
 
-            # Get agents
-            coder = random.choice(self.coders)
-            reviewer = random.choice(self.reviewers)
+            # Get planner - new
+            planner = random.choice(self.planners)
 
-            # Generate code
-            code = coder.step(task)
+            # Create workflow decomposition - new
+            subtasks = planner.create_workflow(task)
+            span.set_attribute("workflow.subtasks", json.dumps(subtasks))
+            print(f"Workflow created with {len(subtasks)} subtasks")
 
-            # Inject bad code (10% chance)
-            is_bad_code = random.random() < 0.1
-            if is_bad_code:
-                original_code = code
-                code = self._generate_bad_code()
-                error_sources.append("bad_code")
-                print(f"  !! Bad code injected (original: {original_code[:20]}...)")
+            # Execute subtasks
+            subtask_results = []
+            total_similarity = 0
+            total_errors = 0
 
-            # Calculate similarity
-            similarity = self.similarity_calculator.calculate_similarity(task, code)
+            for i, subtask in enumerate(subtasks):
+                with tracer.start_as_current_span(f"Subtask.{i + 1}") as subtask_span:
+                    subtask_span.set_attribute("subtask.description", subtask)
+                    print(f"\nProcessing subtask {i + 1}/{len(subtasks)}: {subtask}")
 
-            # Review code
-            result = reviewer.step(code)
+                    # Get agents for this subtask
+                    coder = random.choice(self.coders)
+                    reviewer = random.choice(self.reviewers)
 
-            # Final metrics
+                    # Generate code
+                    code = coder.step(subtask)
+
+                    # Inject bad code (10% chance) - per subtask now
+                    is_bad_code = random.random() < 0.1
+                    if is_bad_code:
+                        original_code = code
+                        code = self._generate_bad_code()
+                        error_sources.append(f"subtask_{i + 1}_bad_code")
+                        print(f"  !! Bad code injected in subtask {i + 1}")
+
+                    # Calculate similarity for this subtask
+                    similarity = self.similarity_calculator.calculate_similarity(subtask, code)
+                    total_similarity += similarity
+
+                    # Review code
+                    result = reviewer.step(code)
+
+                    # Record subtask results
+                    subtask_results.append({
+                        "subtask": subtask,
+                        "code": code,
+                        "result": result,
+                        "similarity": similarity
+                    })
+
+                    # Add subtask attributes to span
+                    subtask_span.set_attribute("subtask.similarity", float(similarity))
+                    subtask_span.set_attribute("subtask.result", result)
+
+            # Calculate average similarity across subtasks
+            avg_similarity = total_similarity / len(subtasks) if subtasks else 0
+
+            # metrics
             errors = len(error_sources)
-            span.set_attribute("task_code.similarity", float(similarity))
+            span.set_attribute("task_code.avg_similarity", float(avg_similarity))
             span.set_attribute("task.errors", errors)
             span.set_attribute("task.error_sources", ",".join(error_sources))
-            span.set_attribute("task.result", result)
+            span.set_attribute("task.result", "Completed")  # Overall task status
 
-            print(f"Task completed: {result} (Similarity: {similarity:.2f}, Errors: {errors})")
+            print(f"\nMain task completed. Avg similarity: {avg_similarity:.2f}, Errors: {errors}")
             return {
                 "task": task,
                 "original_task": original_task,
-                "code": code,
-                "result": result,
-                "similarity": similarity,
+                "workflow": subtasks,
+                "subtask_results": subtask_results,
+                "similarity": avg_similarity,
                 "errors": errors,
                 "error_sources": error_sources
             }
