@@ -2,3 +2,5 @@ mesa
 opentelemetry-sdk
 requests
 opentelemetry-sdk
+sentence-transformers
+scikit-learn

@@ -1,42 +1,58 @@
-from opentelemetry import trace
-
 from model import CodeReviewModel
+import pandas as pd
 from tracing.setup_tracer import tracer
 
-# Wrap entire simulation in a trace
-with tracer.start_as_current_span("Simulation.run") as sim_span:
-    # Initialize model
-    model = CodeReviewModel(num_coders=2, num_reviewers=1)
+# Initialize model
+model = CodeReviewModel(num_coders=2, num_reviewers=1)
 
-    # Test with sample tasks
-    tasks = [
-        "Implement user login with OAuth",
-        "Add payment processing system",
-        "Create user profile page with avatar upload",
-        "Fix security vulnerability"
-    ]
+# Test with sample tasks
+tasks = [
+    "Implement user login with OAuth",
+    "Add payment processing system",
+    "Create user profile page with avatar upload",
+    "Fix security vulnerability"
+]
 
-    sim_span.set_attribute("num.tasks", len(tasks))
-    print(f"Starting simulation with {len(tasks)} tasks...")
+print(f"Starting simulation with {len(tasks)} tasks...")
+results = []
+for i, task in enumerate(tasks):
+    print(f"\nProcessing task {i + 1}/{len(tasks)}")
+    results.append(model.run_task(task))
 
-    results = []
-    for i, task in enumerate(tasks):
-        task_span = tracer.start_span(f"Task.{i + 1}")
-        with trace.use_span(task_span, end_on_exit=True):
-            task_span.set_attribute("task.description", task)
-            print(f"\nProcessing task {i + 1}/{len(tasks)}")
-            results.append(model.run_task(task))
+print("\nSIMULATION COMPLETE!")
+print("=" * 60)
+print("TASK METRICS SUMMARY:")
+print("=" * 60)
 
-    print("\nSIMULATION COMPLETE!")
-    print("=" * 40)
-    for i, r in enumerate(results):
-        print(f"Task {i + 1}: {r['task']}")
-        print(f"  Result: {r['result']}")
-        print(f"  Code: {r['code'][:40]}{'...' if len(r['code']) > 40 else ''}")
-        print("-" * 40)
+# Create detailed report
+report_data = []
+for i, r in enumerate(results):
+    report_data.append({
+        "task_id": i + 1,
+        "assigned_task": r['task'],
+        "original_task": r['original_task'],
+        "similarity": r['similarity'],
+        "errors": r['errors'],
+        "error_sources": ", ".join(r['error_sources']) if r['error_sources'] else "None",
+        "result": r['result'],
+        "code_snippet": r['code'][:100] + ('...' if len(r['code']) > 100 else '')
+    })
 
-    # Record overall stats
-    approved = sum(1 for r in results if r['result'] == "Approved")
-    sim_span.set_attribute("tasks.approved", approved)
-    sim_span.set_attribute("tasks.rejected", len(tasks) - approved)
-    print(f"\nSUMMARY: {approved}/{len(tasks)} tasks approved")
+df = pd.DataFrame(report_data)
+pd.set_option('display.max_columns', None)
+pd.set_option('display.width', 1000)
+print(df)
+
+# Save full results
+df.to_csv("results/simulation_metrics.csv", index=False)
+print("\nDetailed metrics saved to results/simulation_metrics.csv")
+
+# Calculate statistics
+approval_rate = df[df['result'] == 'Approved'].shape[0] / len(df)
+avg_similarity = df['similarity'].mean()
+error_rate = (df['errors'] > 0).mean()
+
+print("\nSUMMARY STATISTICS:")
+print(f"Approval rate: {approval_rate:.1%}")
+print(f"Average similarity: {avg_similarity:.2f}")
+print(f"Error incidence rate: {error_rate:.1%}")
