@@ -2,24 +2,31 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import (
     ConsoleSpanExporter,
-    SimpleSpanProcessor
+    SimpleSpanProcessor,
+    BatchSpanProcessor  # NEW
 )
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 
 
 def setup_tracer():
-    # Tracer provider
-    provider = TracerProvider()
+    # Tracer provider with service name
+    resource = Resource(attributes={
+        SERVICE_NAME: "code-review-mas"
+    })
+    provider = TracerProvider(resource=resource)
 
-    # Console exporter (we'll use Jaeger later)
-    exporter = ConsoleSpanExporter()
+    # Console exporter
+    console_exporter = ConsoleSpanExporter()
 
-    # Add processor to the provider
-    processor = SimpleSpanProcessor(exporter)
+    # Use BatchSpanProcessor for better performance
+    processor = BatchSpanProcessor(
+        console_exporter,
+        max_export_batch_size=100,
+        schedule_delay_millis=5000
+    )
     provider.add_span_processor(processor)
 
-    # The global tracer provider
     trace.set_tracer_provider(provider)
-
     return trace.get_tracer(__name__)
 
 

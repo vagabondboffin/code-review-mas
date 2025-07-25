@@ -4,34 +4,48 @@ import pandas as pd
 from tracing.setup_tracer import tracer
 import time
 import random
+import json
+import os
+from datetime import datetime
 
 
 def main():
     # Initialize model with planner
     model = CodeReviewModel(num_coders=2, num_reviewers=1, num_planners=1)
-
-    # Initialize task generator
     task_gen = TaskGenerator()
 
-    # Generate tasks using LLM
-    num_tasks = 1
+    # Create results directory with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    results_dir = f"results/stress_test_{timestamp}"
+    os.makedirs(results_dir, exist_ok=True)
+
+    # Generate 50 tasks using LLM
+    num_tasks = 50
     tasks = []
     print(f"🔧 Generating {num_tasks} tasks with LLM...")
+
+    # Generate tasks in batches to avoid rate limiting
     for i in range(num_tasks):
         with tracer.start_as_current_span("TaskGeneration") as span:
-            task = task_gen.generate_task()
+            task = task_gen.generate_task(temperature=0.8)  # More creative tasks
             tasks.append(task)
             span.set_attribute("task.content", task)
-            print(f"  Generated task {i + 1}: {task}")
-        time.sleep(1)  # Avoid rate limiting
+            if (i + 1) % 10 == 0:
+                print(f"  Generated task {i + 1}/{num_tasks}")
+            time.sleep(0.5)  # Reduced sleep time
 
-    # Run simulation with workflow execution
-    print(f"\n🚀 Starting simulation with {len(tasks)} generated tasks...")
+    # Save generated tasks
+    with open(f"{results_dir}/tasks.json", "w") as f:
+        json.dump(tasks, f)
+
+    # Run simulation
+    print(f"\n🚀 Starting simulation with {len(tasks)} tasks...")
     full_results = []
+    start_time = time.time()
 
     for i, task in enumerate(tasks):
         print(f"\n{'=' * 60}")
-        print(f"🔍 PROCESSING MAIN TASK {i + 1}/{len(tasks)}: {task}")
+        print(f"🔍 PROCESSING TASK {i + 1}/{len(tasks)}")
         print(f"{'=' * 60}")
 
         with tracer.start_as_current_span(f"MainTask.{i + 1}") as task_span:
@@ -39,24 +53,18 @@ def main():
             task_result = model.run_task(task)
             full_results.append(task_result)
 
-            # Print workflow summary
-            print(f"\n📋 Workflow Summary for Task {i + 1}:")
-            for j, subtask in enumerate(task_result['workflow']):
-                result = task_result['subtask_results'][j]['result']
-                similarity = task_result['subtask_results'][j].get('similarity', 0)
-                print(f"  Subtask {j + 1}: {subtask[:50]}... → {result} (Sim: {similarity:.2f})")
-
-            # Add main task metrics to span
-            task_span.set_attribute("task.avg_similarity", task_result['similarity'])
-            task_span.set_attribute("task.errors", task_result['errors'])
-
-    # Generate detailed reports
+    # Generate reports
     print("\n📊 SIMULATION COMPLETE! GENERATING REPORTS...")
-    generate_reports(full_results)
+    generate_reports(full_results, results_dir)
+
+    # Performance metrics
+    duration = time.time() - start_time
+    print(f"\n⏱️  STRESS TEST COMPLETED IN {duration:.2f} SECONDS")
+    print(f"⏱️  AVERAGE TIME PER TASK: {duration / num_tasks:.2f} SECONDS")
 
 
-def generate_reports(full_results):
-    # Main task report
+def generate_reports(full_results, results_dir):
+    # Main task report (CSV)
     main_report = []
     for i, task_result in enumerate(full_results):
         main_report.append({
@@ -67,24 +75,19 @@ def generate_reports(full_results):
             "avg_similarity": task_result['similarity'],
             "errors": task_result['errors'],
             "error_sources": ", ".join(task_result['error_sources']),
-            "success_rate": sum(1 for r in task_result['subtask_results'] if r['result'] == "Approved") / len(
-                task_result['subtask_results'])
+            "success_rate": sum(1 for r in task_result['subtask_results'] if r['result'] == "Approved") /
+                            len(task_result['subtask_results'])
         })
 
     df_main = pd.DataFrame(main_report)
-    print("\n📈 MAIN TASK REPORT:")
-    print("=" * 80)
-    print(df_main)
-    df_main.to_csv("results/main_task_metrics.csv", index=False)
-    print("\n💾 Main task metrics saved to results/main_task_metrics.csv")
+    df_main.to_csv(f"{results_dir}/main_task_metrics.csv", index=False)
 
-    # Subtask-level report
+    # Subtask-level report (CSV)
     subtask_report = []
     for i, task_result in enumerate(full_results):
         for j, subtask_result in enumerate(task_result['subtask_results']):
             subtask_report.append({
                 "main_task_id": i + 1,
-                "main_task": task_result['task'],
                 "subtask_id": j + 1,
                 "subtask": subtask_result['subtask'],
                 "result": subtask_result['result'],
@@ -93,22 +96,60 @@ def generate_reports(full_results):
             })
 
     df_subtasks = pd.DataFrame(subtask_report)
-    print("\n📊 SUBTASK REPORT:")
-    print("=" * 80)
-    print(df_subtasks.head(10))  # Show first 10 subtasks
-    df_subtasks.to_csv("results/subtask_metrics.csv", index=False)
-    print("\n💾 Subtask metrics saved to results/subtask_metrics.csv")
+    df_subtasks.to_csv(f"{results_dir}/subtask_metrics.csv", index=False)
 
-    # Summary statistics
-    total_subtasks = len(df_subtasks)
-    approval_rate = df_subtasks[df_subtasks['result'] == 'Approved'].shape[0] / total_subtasks
-    avg_similarity = df_subtasks['similarity'].mean()
+    # Full results in JSONL format
+    with open(f"{results_dir}/full_results.jsonl", "w") as f:
+        for result in full_results:
+            f.write(json.dumps(result) + "\n")
 
-    print("\n📌 SUMMARY STATISTICS:")
-    print(f"Total main tasks: {len(full_results)}")
-    print(f"Total subtasks: {total_subtasks}")
-    print(f"Subtask approval rate: {approval_rate:.1%}")
-    print(f"Average subtask similarity: {avg_similarity:.2f}")
+    # Validation report
+    validation_results = validate_span_coverage(full_results)
+    with open(f"{results_dir}/validation_report.txt", "w") as f:
+        f.write("SPAN COVERAGE VALIDATION REPORT\n")
+        f.write("=" * 50 + "\n")
+        f.write(f"Tasks Processed: {len(full_results)}\n")
+        f.write(f"Tasks With Complete Coverage: {validation_results['complete_coverage']}/{len(full_results)}\n")
+        f.write(f"Coverage Success Rate: {validation_results['coverage_rate']:.1%}\n\n")
+        f.write("COMMON MISSING SPANS:\n")
+        for span_type, count in validation_results['missing_spans'].most_common(5):
+            f.write(f"- {span_type}: {count} occurrences\n")
+
+    print(f"\n💾 All reports saved to: {results_dir}")
+
+
+def validate_span_coverage(full_results):
+    from collections import Counter
+    validation = {
+        "complete_coverage": 0,
+        "missing_spans": Counter(),
+        "coverage_rate": 0
+    }
+
+    required_spans = [
+        "Model.run_task",
+        "Planner.create_workflow",
+        "CoderAgent.step",
+        "ReviewerAgent.step"
+    ]
+
+    for result in full_results:
+        missing = []
+        for span in required_spans:
+            if not any(span in source for source in result['error_sources']):
+                if span == "Planner.create_workflow" and len(result['workflow']) == 0:
+                    missing.append(span)
+                elif span not in ["Planner.create_workflow"]:  # Planner is always present
+                    missing.append(span)
+
+        if not missing:
+            validation["complete_coverage"] += 1
+        else:
+            for span in missing:
+                validation["missing_spans"][span] += 1
+
+    validation["coverage_rate"] = validation["complete_coverage"] / len(full_results)
+    return validation
 
 
 if __name__ == "__main__":

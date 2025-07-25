@@ -1,0 +1,3 @@
+memory-profiler
+psutil
+pytest-benchmark
