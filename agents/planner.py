@@ -26,7 +26,7 @@ class PlannerAgent:
 
             try:
                 response = client.chat.completions.create(  # Updated method
-                    model="gpt-4-turbo",
+                    model="gpt-4o",
                     messages=[
                         {"role": "system",
                          "content": "You are a software architect. Break technical tasks into 2-4 subtasks in JSON format."},

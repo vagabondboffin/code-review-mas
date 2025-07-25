@@ -11,6 +11,16 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Create client instance
 class TaskGenerator:
     def __init__(self, model="gpt-4o"):
         self.model = model
+        self.task_types = [
+            "authentication system",
+            "payment processing",
+            "user profile management",
+            "data storage solution",
+            "API endpoint",
+            "security feature",
+            "notification service",
+            "performance optimization"
+        ]
 
     def generate_task(self, temperature=0.7) -> str:
         """Generate a backend feature request using LLM"""
