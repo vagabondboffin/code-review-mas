@@ -7,9 +7,31 @@ import random
 import json
 import os
 from datetime import datetime
+import logging
+from opentelemetry import trace
+import numpy as np  # NEW: For float conversion
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+def convert_float32(obj):
+    """Recursively convert float32 to Python float for JSON serialization"""
+    if isinstance(obj, np.float32):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {k: convert_float32(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_float32(elem) for elem in obj]
+    else:
+        return obj
 
 
 def main():
+    # Initialize Jaeger tracer
+    tracer = trace.get_tracer_provider().get_tracer(__name__)
+
     # Initialize model with planner
     model = CodeReviewModel(num_coders=2, num_reviewers=1, num_planners=1)
     task_gen = TaskGenerator()
@@ -19,48 +41,54 @@ def main():
     results_dir = f"results/stress_test_{timestamp}"
     os.makedirs(results_dir, exist_ok=True)
 
-    # Generate 50 tasks using LLM
-    num_tasks = 50
+    # Generate tasks using LLM
+    num_tasks = 5
     tasks = []
     print(f"🔧 Generating {num_tasks} tasks with LLM...")
 
-    # Generate tasks in batches to avoid rate limiting
-    for i in range(num_tasks):
-        with tracer.start_as_current_span("TaskGeneration") as span:
-            task = task_gen.generate_task(temperature=0.8)  # More creative tasks
-            tasks.append(task)
-            span.set_attribute("task.content", task)
-            if (i + 1) % 10 == 0:
-                print(f"  Generated task {i + 1}/{num_tasks}")
-            time.sleep(0.5)  # Reduced sleep time
+    # Create parent span for entire simulation
+    with tracer.start_as_current_span("FullSimulation") as sim_span:
+        sim_span.set_attribute("task_count", num_tasks)
+        sim_span.set_attribute("jaeger.export", True)
 
-    # Save generated tasks
-    with open(f"{results_dir}/tasks.json", "w") as f:
-        json.dump(tasks, f)
+        # Generate tasks in batches
+        for i in range(num_tasks):
+            with tracer.start_as_current_span("TaskGeneration") as span:
+                task = task_gen.generate_task(temperature=0.8)
+                tasks.append(task)
+                span.set_attribute("task.content", task)
+                if (i + 1) % 10 == 0:
+                    print(f"  Generated task {i + 1}/{num_tasks}")
+                time.sleep(0.5)
 
-    # Run simulation
-    print(f"\n🚀 Starting simulation with {len(tasks)} tasks...")
-    full_results = []
-    start_time = time.time()
+        # Save generated tasks
+        with open(f"{results_dir}/tasks.json", "w") as f:
+            json.dump(tasks, f)
 
-    for i, task in enumerate(tasks):
-        print(f"\n{'=' * 60}")
-        print(f"🔍 PROCESSING TASK {i + 1}/{len(tasks)}")
-        print(f"{'=' * 60}")
+        # Run simulation
+        print(f"\n🚀 Starting simulation with {len(tasks)} tasks...")
+        full_results = []
+        start_time = time.time()
 
-        with tracer.start_as_current_span(f"MainTask.{i + 1}") as task_span:
-            task_span.set_attribute("task.description", task)
-            task_result = model.run_task(task)
-            full_results.append(task_result)
+        for i, task in enumerate(tasks):
+            print(f"\n{'=' * 60}")
+            print(f"🔍 PROCESSING TASK {i + 1}/{len(tasks)}")
+            print(f"{'=' * 60}")
 
-    # Generate reports
-    print("\n📊 SIMULATION COMPLETE! GENERATING REPORTS...")
-    generate_reports(full_results, results_dir)
+            with tracer.start_as_current_span(f"MainTask.{i + 1}") as task_span:
+                task_span.set_attribute("task.description", task)
+                task_result = model.run_task(task)
+                full_results.append(task_result)
 
-    # Performance metrics
-    duration = time.time() - start_time
-    print(f"\n⏱️  STRESS TEST COMPLETED IN {duration:.2f} SECONDS")
-    print(f"⏱️  AVERAGE TIME PER TASK: {duration / num_tasks:.2f} SECONDS")
+        # Generate reports
+        print("\n📊 SIMULATION COMPLETE! GENERATING REPORTS...")
+        generate_reports(full_results, results_dir)
+
+        # Performance metrics
+        duration = time.time() - start_time
+        sim_span.set_attribute("simulation.duration", duration)
+        print(f"\n⏱️  STRESS TEST COMPLETED IN {duration:.2f} SECONDS")
+        print(f"⏱️  AVERAGE TIME PER TASK: {duration / num_tasks:.2f} SECONDS")
 
 
 def generate_reports(full_results, results_dir):
@@ -98,10 +126,12 @@ def generate_reports(full_results, results_dir):
     df_subtasks = pd.DataFrame(subtask_report)
     df_subtasks.to_csv(f"{results_dir}/subtask_metrics.csv", index=False)
 
-    # Full results in JSONL format
+    # Full results in JSONL format (with float conversion)
     with open(f"{results_dir}/full_results.jsonl", "w") as f:
         for result in full_results:
-            f.write(json.dumps(result) + "\n")
+            # Convert float32 to standard float
+            converted_result = convert_float32(result)
+            f.write(json.dumps(converted_result) + "\n")
 
     # Validation report
     validation_results = validate_span_coverage(full_results)
@@ -115,7 +145,38 @@ def generate_reports(full_results, results_dir):
         for span_type, count in validation_results['missing_spans'].most_common(5):
             f.write(f"- {span_type}: {count} occurrences\n")
 
+    # Jaeger visualization guide
+    with open(f"{results_dir}/jaeger_guide.txt", "w") as f:
+        f.write("JAEGER TRACE VISUALIZATION GUIDE\n")
+        f.write("=" * 50 + "\n")
+        f.write("1. Start Jaeger: docker run -d --name jaeger \\\n")
+        f.write("   -e COLLECTOR_OTLP_ENABLED=true \\\n")
+        f.write("   -p 16686:16686 -p 4317:4317 \\\n")
+        f.write("   jaegertracing/all-in-one:latest\n\n")
+        f.write("2. Access Jaeger UI: http://localhost:16686\n\n")
+        f.write("3. Search parameters:\n")
+        f.write("   - Service: code-review-mas\n")
+        f.write("   - Operation: FullSimulation\n")
+        f.write("   - Tags: agent.role OR task.input\n\n")
+        f.write("4. Trace hierarchy example:\n")
+        f.write("   FullSimulation (root)\n")
+        f.write("   ├── TaskGeneration\n")
+        f.write("   ├── MainTask.1\n")
+        f.write("   │   ├── Model.run_task\n")
+        f.write("   │   │   ├── Planner.create_workflow\n")
+        f.write("   │   │   ├── Subtask.1\n")
+        f.write("   │   │   │   ├── CoderAgent.step\n")
+        f.write("   │   │   │   └── ReviewerAgent.step\n")
+        f.write("   │   │   └── Subtask.2\n")
+        f.write("   │   │       ├── CoderAgent.step\n")
+        f.write("   │   │       └── ReviewerAgent.step\n")
+        f.write("   └── MainTask.2\n\n")
+        f.write("5. Troubleshooting:\n")
+        f.write("   - No traces? Check Docker: docker logs jaeger\n")
+        f.write("   - Connection issues? Verify OTLP exporter config\n")
+
     print(f"\n💾 All reports saved to: {results_dir}")
+    print("📘 Jaeger guide available in jaeger_guide.txt")
 
 
 def validate_span_coverage(full_results):
@@ -139,7 +200,7 @@ def validate_span_coverage(full_results):
             if not any(span in source for source in result['error_sources']):
                 if span == "Planner.create_workflow" and len(result['workflow']) == 0:
                     missing.append(span)
-                elif span not in ["Planner.create_workflow"]:  # Planner is always present
+                elif span not in ["Planner.create_workflow"]:
                     missing.append(span)
 
         if not missing:
