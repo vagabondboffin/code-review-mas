@@ -1,0 +1,10 @@
+SPAN COVERAGE VALIDATION REPORT
+==================================================
+Tasks Processed: 5
+Tasks With Complete Coverage: 0/5
+Coverage Success Rate: 0.0%
+
+COMMON MISSING SPANS:
+- Model.run_task: 5 occurrences
+- CoderAgent.step: 5 occurrences
+- ReviewerAgent.step: 5 occurrences

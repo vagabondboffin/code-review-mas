@@ -12,6 +12,10 @@ class CoderAgent:
         if task is None:
             raise ValueError("Coder requires a task")
 
+        # Ensure task is a string
+        if not isinstance(task, str):
+            task = str(task)
+
         with tracer.start_as_current_span("CoderAgent.step") as span:
             span.set_attribute("agent.id", self.unique_id)
             span.set_attribute("agent.role", self.role)
@@ -35,6 +39,8 @@ class CoderAgent:
             span.set_attribute("task.status", "completed")
 
             return code
+
+    # ... (keep existing code generation methods unchanged) ...
 
     def _generate_login_code(self):
         implementations = [

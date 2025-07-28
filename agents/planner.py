@@ -1,12 +1,11 @@
 from tracing.setup_tracer import tracer
-from openai import OpenAI  # Updated import
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import json
 
-# Load environment variables
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Create client instance
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 class PlannerAgent:
@@ -25,11 +24,11 @@ class PlannerAgent:
             print(f"Planner {self.unique_id} decomposing task...")
 
             try:
-                response = client.chat.completions.create(  # Updated method
+                response = client.chat.completions.create(
                     model="gpt-4o",
                     messages=[
                         {"role": "system",
-                         "content": "You are a software architect. Break technical tasks into 2-4 subtasks in JSON format."},
+                         "content": "You are a software architect. Break technical tasks into 2-4 subtasks as JSON strings."},
                         {"role": "user",
                          "content": f"Decompose this backend task: {task}\nOutput JSON format: {{'subtasks': [str]}}"}
                     ],
@@ -38,9 +37,12 @@ class PlannerAgent:
                     max_tokens=300
                 )
 
-                content = response.choices[0].message.content  # Updated access
+                content = response.choices[0].message.content
                 workflow = json.loads(content)
                 subtasks = workflow.get('subtasks', [])
+
+                # Ensure all subtasks are strings
+                subtasks = [str(item) for item in subtasks]
 
                 span.set_attribute("workflow.subtasks", json.dumps(subtasks))
                 print(f"Planner created {len(subtasks)} subtasks")
@@ -50,8 +52,6 @@ class PlannerAgent:
                 print(f"Planning failed: {e}")
                 span.record_exception(e)
                 return self._fallback_workflow(task)
-
-    # ... rest unchanged ...
 
     def _fallback_workflow(self, task: str) -> list:
         """Fallback workflow generation"""

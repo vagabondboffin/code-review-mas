@@ -1,11 +1,14 @@
 mesa
 opentelemetry-sdk
 opentelemetry-api
-opentelemetry-exporter-otlp-proto-grpc  # NEW
-
-requests
 sentence-transformers
 scikit-learn
-openai
-python-dotenv
 pandas
+python-dotenv
+openai
+opentelemetry-exporter-otlp-proto-grpc
+seaborn
+matplotlib
+plotly
+networkx
+scipy

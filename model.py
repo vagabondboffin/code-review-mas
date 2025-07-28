@@ -10,6 +10,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class CodeReviewModel:
     def __init__(self, num_coders=2, num_reviewers=1, num_planners=1):
         self.next_id = 0
@@ -17,7 +18,7 @@ class CodeReviewModel:
         self.reviewers = []
         self.planners = []
 
-        # Create planners (new)
+        # Create planners
         for _ in range(num_planners):
             agent = PlannerAgent(self.next_id, self)
             self.planners.append(agent)
@@ -63,16 +64,14 @@ class CodeReviewModel:
             span.set_attribute("task.synthetic_ambiguity", is_synthetic_ambiguity)
             span.set_attribute("task.natural_ambiguity", is_natural_ambiguity)
 
-            # print(f"\nStarting main task: {task}")
-            logger.info(f"Starting task: {task[:50]}")
+            print(f"\nStarting main task: {task}")
             if is_synthetic_ambiguity or is_natural_ambiguity:
-                logger.warning(f"Ambiguous task detected: {error_sources}")
-                # print(f"  !! Ambiguous task (sources: {', '.join(error_sources)})")
+                print(f"  !! Ambiguous task (sources: {', '.join(error_sources)})")
 
-            # Get planner - new
+            # Get planner
             planner = random.choice(self.planners)
 
-            # Create workflow decomposition - new
+            # Create workflow decomposition
             subtasks = planner.create_workflow(task)
             span.set_attribute("workflow.subtasks", json.dumps(subtasks))
             print(f"Workflow created with {len(subtasks)} subtasks")
@@ -82,15 +81,12 @@ class CodeReviewModel:
             total_similarity = 0
             total_errors = 0
 
-            # Trace span creation
-            span_created = {
-                "model_run_task": True,
-                "planner_workflow": bool(subtasks),
-                "coder_steps": 0,
-                "review_steps": 0
-            }
-
             for i, subtask in enumerate(subtasks):
+                # Ensure subtask is a string
+                if not isinstance(subtask, str):
+                    subtask = str(subtask)
+                    error_sources.append(f"subtask_{i + 1}_type_conversion")
+
                 with tracer.start_as_current_span(f"Subtask.{i + 1}") as subtask_span:
                     subtask_span.set_attribute("subtask.description", subtask)
                     print(f"\nProcessing subtask {i + 1}/{len(subtasks)}: {subtask}")
@@ -102,7 +98,7 @@ class CodeReviewModel:
                     # Generate code
                     code = coder.step(subtask)
 
-                    # Inject bad code (10% chance) - per subtask now
+                    # Inject bad code (10% chance)
                     is_bad_code = random.random() < 0.1
                     if is_bad_code:
                         original_code = code
@@ -129,10 +125,6 @@ class CodeReviewModel:
                     subtask_span.set_attribute("subtask.similarity", float(similarity))
                     subtask_span.set_attribute("subtask.result", result)
 
-                    span_created["coder_steps"] += 1
-                    span_created["review_steps"] += 1
-
-
             # Calculate average similarity across subtasks
             avg_similarity = total_similarity / len(subtasks) if subtasks else 0
 
@@ -143,11 +135,6 @@ class CodeReviewModel:
             span.set_attribute("task.error_sources", ",".join(error_sources))
             span.set_attribute("task.result", "Completed")  # Overall task status
 
-            # Record span coverage in error sources
-            for key, present in span_created.items():
-                if not present:
-                    error_sources.append(f"missing_span_{key}")
-
             print(f"\nMain task completed. Avg similarity: {avg_similarity:.2f}, Errors: {errors}")
             return {
                 "task": task,
@@ -156,8 +143,7 @@ class CodeReviewModel:
                 "subtask_results": subtask_results,
                 "similarity": avg_similarity,
                 "errors": errors,
-                "error_sources": error_sources,
-                "span_coverage": span_created
+                "error_sources": error_sources
             }
 
     def _make_ambiguous(self, task: str) -> str:

@@ -1,0 +1,31 @@
+JAEGER TRACE VISUALIZATION GUIDE
+==================================================
+1. Start Jaeger: docker run -d --name jaeger \
+   -e COLLECTOR_OTLP_ENABLED=true \
+   -p 16686:16686 -p 4317:4317 \
+   jaegertracing/all-in-one:latest
+
+2. Access Jaeger UI: http://localhost:16686
+
+3. Search parameters:
+   - Service: code-review-mas
+   - Operation: FullSimulation
+   - Tags: agent.role OR task.input
+
+4. Trace hierarchy example:
+   FullSimulation (root)
+   ├── TaskGeneration
+   ├── MainTask.1
+   │   ├── Model.run_task
+   │   │   ├── Planner.create_workflow
+   │   │   ├── Subtask.1
+   │   │   │   ├── CoderAgent.step
+   │   │   │   └── ReviewerAgent.step
+   │   │   └── Subtask.2
+   │   │       ├── CoderAgent.step
+   │   │       └── ReviewerAgent.step
+   └── MainTask.2
+
+5. Troubleshooting:
+   - No traces? Check Docker: docker logs jaeger
+   - Connection issues? Verify OTLP exporter config

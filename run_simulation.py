@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 import logging
 from opentelemetry import trace
-import numpy as np  # NEW: For float conversion
+import numpy as np
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

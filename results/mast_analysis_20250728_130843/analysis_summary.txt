@@ -1,0 +1,16 @@
+MAST-STYLE ANALYSIS SUMMARY
+==================================================
+
+Tasks Analyzed: 0
+Subtasks Analyzed: 20
+
+Key Metrics:
+- Average Misalignment Score: 0.53
+- Overall Error Rate: 0.35
+- Critical Misalignment Rate: 0.25
+
+Visualizations Generated:
+- misalignment_clusters.png: Distribution of misalignment severity
+- error_rates.png: Error rates by agent role
+- agent_sankey.html: Interactive workflow diagram
+- agent_network.png: Agent interaction network
