@@ -40,7 +40,6 @@ class CoderAgent:
 
             return code
 
-    # ... (keep existing code generation methods unchanged) ...
 
     def _generate_login_code(self):
         implementations = [

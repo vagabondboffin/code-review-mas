@@ -26,19 +26,19 @@ class ReviewerAgent:
 
             # Enhanced error detection logic
             rejection_reason = None
-            result = "Approved"  # Default to approved
+            result = "Approved"  # Default
 
             # Check 1: Code length (original check)
             if len(code) <= 10:
                 result = "Rejected"
                 rejection_reason = "code_too_short"
 
-            # Check 2: Bad code patterns (new)
+            # Check 2: Bad code patterns
             elif any(pattern in code.lower() for pattern in self.bad_code_patterns):
                 result = "Rejected"
                 rejection_reason = "bad_code_pattern"
 
-            # Check 3: Placeholder code (new)
+            # Check 3: Placeholder code
             elif "return" not in code and "=" not in code:
                 result = "Rejected"
                 rejection_reason = "no_implementation"

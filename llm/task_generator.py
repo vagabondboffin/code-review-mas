@@ -1,11 +1,10 @@
 import os
-from openai import OpenAI  # Updated import
+from openai import OpenAI
 from dotenv import load_dotenv
 import random
 
-# Load environment variables
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))  # Create client instance
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
 class TaskGenerator:
@@ -25,7 +24,7 @@ class TaskGenerator:
     def generate_task(self, temperature=0.7) -> str:
         """Generate a backend feature request using LLM"""
         try:
-            response = client.chat.completions.create(  # Updated method
+            response = client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system",
@@ -36,7 +35,7 @@ class TaskGenerator:
                 temperature=temperature,
                 max_tokens=100
             )
-            return response.choices[0].message.content.strip()  # Updated access
+            return response.choices[0].message.content.strip()
         except Exception as e:
             print(f"LLM Error: {e}")
             return self._manual_task_generation()
