@@ -3,12 +3,14 @@ import random
 
 
 class CoderAgent:
-    def __init__(self, unique_id, model):
+    def __init__(self, unique_id, model, ignore_feedback_probability=0.3):
         self.unique_id = unique_id
         self.model = model
         self.role = "Coder"
+        self.ignore_feedback_probability = ignore_feedback_probability  # 30% chance to ignore feedback
+        self.revision_attempts = {}  # Track revision attempts per task
 
-    def step(self, task=None):
+    def step(self, task=None, feedback=None, previous_code=None):
         if task is None:
             raise ValueError("Coder requires a task")
 
@@ -21,26 +23,55 @@ class CoderAgent:
             span.set_attribute("agent.role", self.role)
             span.set_attribute("task.input", task)
 
-            print(f"Coder {self.unique_id} working on: {task}")
+            # Track if this is a revision attempt
+            is_revision = feedback is not None and previous_code is not None
+            span.set_attribute("coding.is_revision", is_revision)
 
-            # Generate realistic code based on task
-            if "login" in task.lower():
-                code = self._generate_login_code()
-            elif "payment" in task.lower():
-                code = self._generate_payment_code()
-            elif "profile" in task.lower():
-                code = self._generate_profile_code()
-            elif "security" in task.lower():
-                code = self._generate_security_code()
-            else:
-                code = self._generate_generic_code(task)
+            if is_revision:
+                span.set_attribute("feedback.received", feedback)
+                span.set_attribute("revision.attempt", self.revision_attempts.get(task, 0))
+
+            print(f"Coder {self.unique_id} working on: {task}")
+            if is_revision:
+                print(f"  📝 Revision requested. Feedback: {feedback}")
+
+            # FAILURE INJECTION: Ignore feedback with specified probability
+            if is_revision and feedback == "Rejected":
+                if random.random() < self.ignore_feedback_probability:
+                    span.set_attribute("failure.ignored_feedback", True)
+                    span.set_attribute("failure.type", "ignored_reviewer_input")
+                    span.set_attribute("task.output", previous_code)
+                    span.set_attribute("task.status", "completed_ignored_feedback")
+                    print(f"  🚨 Coder {self.unique_id} IGNORED feedback and kept original code")
+                    return previous_code  # Return the rejected code anyway
+
+            # Normal code generation (original logic)
+            code = self._generate_code_based_on_task(task)
+
+            # If this is a revision (but we didn't ignore), track the attempt
+            if is_revision and feedback == "Rejected":
+                self.revision_attempts[task] = self.revision_attempts.get(task, 0) + 1
+                span.set_attribute("revision.attempt_count", self.revision_attempts[task])
+                print(f"  ✅ Coder {self.unique_id} attempted revision")
 
             span.set_attribute("task.output", code)
             span.set_attribute("task.status", "completed")
-
             return code
 
+    def _generate_code_based_on_task(self, task):
+        """Original code generation logic extracted for clarity"""
+        if "login" in task.lower():
+            return self._generate_login_code()
+        elif "payment" in task.lower():
+            return self._generate_payment_code()
+        elif "profile" in task.lower():
+            return self._generate_profile_code()
+        elif "security" in task.lower():
+            return self._generate_security_code()
+        else:
+            return self._generate_generic_code(task)
 
+    # ... keep all the existing code generation methods unchanged ...
     def _generate_login_code(self):
         implementations = [
             "def authenticate_user(username, password):\n    # TODO: Implement OAuth\n    return True",
@@ -71,6 +102,5 @@ class CoderAgent:
         return random.choice(implementations)
 
     def _generate_generic_code(self, task):
-        # Convert task to function name
         func_name = task.lower().replace(' ', '_').replace('-', '_')[:20]
         return f"def {func_name}():\n    \"\"\"{task}\"\"\"\n    # Implementation goes here\n    return True"
