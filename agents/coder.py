@@ -1,9 +1,11 @@
 from tracing.setup_tracer import tracer
+# Add to imports in model.py and agents/coder.py
+from opentelemetry.trace import Status, StatusCode
 import random
 
 
 class CoderAgent:
-    def __init__(self, unique_id, model, ignore_feedback_probability=0.3):
+    def __init__(self, unique_id, model, ignore_feedback_probability=0.7):
         self.unique_id = unique_id
         self.model = model
         self.role = "Coder"
@@ -38,12 +40,17 @@ class CoderAgent:
             # FAILURE INJECTION: Ignore feedback with specified probability
             if is_revision and feedback == "Rejected":
                 if random.random() < self.ignore_feedback_probability:
+                    # MAJOR CHANGE: Signal this as an intentional failure
+                    span.set_status(StatusCode.ERROR, "Intentionally ignoring feedback for experiment")
+                    span.record_exception(
+                        Exception(f"Coder {self.unique_id} intentionally ignoring Reviewer feedback")
+                    )
                     span.set_attribute("failure.ignored_feedback", True)
-                    span.set_attribute("failure.type", "ignored_reviewer_input")
+                    span.set_attribute("failure.severity", "high")
                     span.set_attribute("task.output", previous_code)
-                    span.set_attribute("task.status", "completed_ignored_feedback")
-                    print(f"  🚨 Coder {self.unique_id} IGNORED feedback and kept original code")
-                    return previous_code  # Return the rejected code anyway
+                    span.set_attribute("task.status", "failed_ignored_feedback")
+                    print(f"  🚨 Coder {self.unique_id} INTENTIONALLY IGNORED feedback")
+                    return previous_code
 
             # Normal code generation (original logic)
             code = self._generate_code_based_on_task(task)

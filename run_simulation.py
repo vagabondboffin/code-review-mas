@@ -32,8 +32,15 @@ def main():
     # Initialize Jaeger tracer
     tracer = trace.get_tracer_provider().get_tracer(__name__)
 
-    # Initialize model with planner
-    model = CodeReviewModel(num_coders=2, num_reviewers=1, num_planners=1)
+    # Initialize model with feedback loop enabled for failure injection
+    enable_failure_injection = True  # Set to False for baseline comparison
+    model = CodeReviewModel(
+        num_coders=2,
+        num_reviewers=1,
+        num_planners=1,
+        enable_feedback_loop=enable_failure_injection
+    )
+
     task_gen = TaskGenerator()
 
     # Create results directory with timestamp
@@ -42,14 +49,18 @@ def main():
     os.makedirs(results_dir, exist_ok=True)
 
     # Generate tasks using LLM
-    num_tasks = 5
+    num_tasks = 10
     tasks = []
     print(f"🔧 Generating {num_tasks} tasks with LLM...")
+    print(f"⚡ Failure Injection: {enable_failure_injection} (30% ignore probability)")
 
     # Create parent span for entire simulation
     with tracer.start_as_current_span("FullSimulation") as sim_span:
         sim_span.set_attribute("task_count", num_tasks)
         sim_span.set_attribute("jaeger.export", True)
+        sim_span.set_attribute("failure_injection.enabled", enable_failure_injection)
+        sim_span.set_attribute("failure_injection.type", "ignored_reviewer_input")
+        sim_span.set_attribute("failure_injection.probability", 0.3)
 
         # Generate tasks in batches
         for i in range(num_tasks):
@@ -77,12 +88,14 @@ def main():
 
             with tracer.start_as_current_span(f"MainTask.{i + 1}") as task_span:
                 task_span.set_attribute("task.description", task)
+                task_span.set_attribute("failure_injection.enabled", enable_failure_injection)
+
                 task_result = model.run_task(task)
                 full_results.append(task_result)
 
         # Generate reports
         print("\n📊 SIMULATION COMPLETE! GENERATING REPORTS...")
-        generate_reports(full_results, results_dir)
+        generate_reports(full_results, results_dir, enable_failure_injection)
 
         # Performance metrics
         duration = time.time() - start_time
@@ -91,10 +104,15 @@ def main():
         print(f"⏱️  AVERAGE TIME PER TASK: {duration / num_tasks:.2f} SECONDS")
 
 
-def generate_reports(full_results, results_dir):
+def generate_reports(full_results, results_dir, failure_injection_enabled):
     # Main task report (CSV)
     main_report = []
+    total_feedback_failures = 0
+
     for i, task_result in enumerate(full_results):
+        feedback_failures = task_result.get('feedback_loop_failures', 0)
+        total_feedback_failures += feedback_failures
+
         main_report.append({
             "task_id": i + 1,
             "task": task_result['task'],
@@ -103,6 +121,7 @@ def generate_reports(full_results, results_dir):
             "avg_similarity": task_result['similarity'],
             "errors": task_result['errors'],
             "error_sources": ", ".join(task_result['error_sources']),
+            "feedback_loop_failures": feedback_failures,
             "success_rate": sum(1 for r in task_result['subtask_results'] if r['result'] == "Approved") /
                             len(task_result['subtask_results'])
         })
@@ -112,6 +131,8 @@ def generate_reports(full_results, results_dir):
 
     # Subtask-level report (CSV)
     subtask_report = []
+    ignored_feedback_count = 0
+
     for i, task_result in enumerate(full_results):
         for j, subtask_result in enumerate(task_result['subtask_results']):
             subtask_report.append({
@@ -120,8 +141,13 @@ def generate_reports(full_results, results_dir):
                 "subtask": subtask_result['subtask'],
                 "result": subtask_result['result'],
                 "similarity": subtask_result.get('similarity', 0),
+                "had_feedback_loop": subtask_result.get('had_feedback_loop', False),
                 "code_snippet": subtask_result['code'][:100] + ('...' if len(subtask_result['code']) > 100 else '')
             })
+
+            # Count ignored feedback instances
+            if subtask_result.get('had_feedback_loop', False) and subtask_result['result'] == "Rejected":
+                ignored_feedback_count += 1
 
     df_subtasks = pd.DataFrame(subtask_report)
     df_subtasks.to_csv(f"{results_dir}/subtask_metrics.csv", index=False)
@@ -140,10 +166,39 @@ def generate_reports(full_results, results_dir):
         f.write("=" * 50 + "\n")
         f.write(f"Tasks Processed: {len(full_results)}\n")
         f.write(f"Tasks With Complete Coverage: {validation_results['complete_coverage']}/{len(full_results)}\n")
-        f.write(f"Coverage Success Rate: {validation_results['coverage_rate']:.1%}\n\n")
+        f.write(f"Coverage Success Rate: {validation_results['coverage_rate']:.1%}\n")
+        f.write(f"Failure Injection Enabled: {failure_injection_enabled}\n")
+        f.write(f"Total Feedback Loop Failures: {total_feedback_failures}\n")
+        f.write(f"Ignored Feedback Instances: {ignored_feedback_count}\n\n")
         f.write("COMMON MISSING SPANS:\n")
         for span_type, count in validation_results['missing_spans'].most_common(5):
             f.write(f"- {span_type}: {count} occurrences\n")
+
+    # Failure injection analysis
+    with open(f"{results_dir}/failure_analysis.txt", "w") as f:
+        f.write("FAILURE INJECTION ANALYSIS\n")
+        f.write("=" * 50 + "\n")
+        f.write(f"Failure Type: Ignored Reviewer Input\n")
+        f.write(f"Injection Probability: 30%\n")
+        f.write(f"Total Tasks: {len(full_results)}\n")
+        f.write(f"Total Subtasks: {len(df_subtasks)}\n")
+        f.write(f"Feedback Loop Activations: {len(df_subtasks[df_subtasks['had_feedback_loop'] == True])}\n")
+        f.write(f"Ignored Feedback Count: {ignored_feedback_count}\n")
+        f.write(
+            f"Ignore Rate: {ignored_feedback_count / max(1, len(df_subtasks[df_subtasks['had_feedback_loop'] == True])):.1%}\n\n")
+
+        if ignored_feedback_count > 0:
+            f.write("IMPACT ANALYSIS:\n")
+            failed_subtasks = df_subtasks[
+                (df_subtasks['had_feedback_loop'] == True) &
+                (df_subtasks['result'] == 'Rejected')
+                ]
+            if len(failed_subtasks) > 0:
+                avg_similarity_failed = failed_subtasks['similarity'].mean()
+                avg_similarity_all = df_subtasks['similarity'].mean()
+                f.write(f"Average Similarity (Failed): {avg_similarity_failed:.2f}\n")
+                f.write(f"Average Similarity (All): {avg_similarity_all:.2f}\n")
+                f.write(f"Quality Impact: {avg_similarity_all - avg_similarity_failed:.2f} points\n")
 
     # Jaeger visualization guide
     with open(f"{results_dir}/jaeger_guide.txt", "w") as f:
@@ -157,25 +212,32 @@ def generate_reports(full_results, results_dir):
         f.write("3. Search parameters:\n")
         f.write("   - Service: code-review-mas\n")
         f.write("   - Operation: FullSimulation\n")
-        f.write("   - Tags: agent.role OR task.input\n\n")
-        f.write("4. Trace hierarchy example:\n")
-        f.write("   FullSimulation (root)\n")
-        f.write("   ├── TaskGeneration\n")
-        f.write("   ├── MainTask.1\n")
-        f.write("   │   ├── Model.run_task\n")
-        f.write("   │   │   ├── Planner.create_workflow\n")
-        f.write("   │   │   ├── Subtask.1\n")
-        f.write("   │   │   │   ├── CoderAgent.step\n")
-        f.write("   │   │   │   └── ReviewerAgent.step\n")
-        f.write("   │   │   └── Subtask.2\n")
-        f.write("   │   │       ├── CoderAgent.step\n")
-        f.write("   │   │       └── ReviewerAgent.step\n")
-        f.write("   └── MainTask.2\n\n")
-        f.write("5. Troubleshooting:\n")
+        f.write("   - Tags: failure_injection.enabled OR agent.role\n\n")
+        f.write("4. NEW FAILURE TRACES TO LOOK FOR:\n")
+        f.write("   - Feedback.Loop spans (indicates rejection → revision)\n")
+        f.write("   - failure.ignored_feedback: true attributes\n")
+        f.write("   - Subtasks with multiple CoderAgent.step calls\n")
+        f.write("   - Tasks with feedback_loop_failures > 0\n\n")
+        f.write("5. Trace hierarchy with failures:\n")
+        f.write("   MainTask.X\n")
+        f.write("   ├── Model.run_task\n")
+        f.write("   │   ├── Planner.create_workflow\n")
+        f.write("   │   ├── Subtask.1\n")
+        f.write("   │   │   ├── CoderAgent.step\n")
+        f.write("   │   │   ├── ReviewerAgent.step → Rejected\n")
+        f.write("   │   │   └── Feedback.Loop 🚨\n")
+        f.write("   │   │       ├── CoderAgent.step (ignored)\n")
+        f.write("   │   │       └── ReviewerAgent.step → Rejected\n")
+        f.write("   │   └── Subtask.2\n")
+        f.write("   └── MainTask.X (completed with failures)\n\n")
+        f.write("6. Troubleshooting:\n")
         f.write("   - No traces? Check Docker: docker logs jaeger\n")
         f.write("   - Connection issues? Verify OTLP exporter config\n")
 
     print(f"\n💾 All reports saved to: {results_dir}")
+    print(f"🚨 Failure Injection Analysis:")
+    print(f"   - Feedback loop failures: {total_feedback_failures}")
+    print(f"   - Ignored feedback instances: {ignored_feedback_count}")
     print("📘 Jaeger guide available in jaeger_guide.txt")
 
 
