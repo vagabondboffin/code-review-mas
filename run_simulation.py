@@ -11,6 +11,9 @@ import logging
 from opentelemetry import trace
 import numpy as np
 
+from analysis.failure_metrics import run_metrics_analysis
+
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,7 +37,7 @@ def main():
 
     # Initialize model with multiple failure modes
     enable_failure_injection = True
-    derailment_probability = 0.2  # 20% chance of task derailment
+    derailment_probability = 0.3  # 30% chance of task derailment
 
     model = CodeReviewModel(
         num_coders=2,
@@ -56,7 +59,7 @@ def main():
     tasks = []
     print(f"🔧 Generating {num_tasks} tasks with LLM...")
     print(f"⚡ Failure Injection: {enable_failure_injection}")
-    print(f"⚡ Ignore Feedback Probability: 30%")
+    print(f"⚡ Ignore Feedback Probability: 0%")
     print(f"⚡ Task Derailment Probability: {derailment_probability * 100}%")
 
     # Create parent span for entire simulation
@@ -102,6 +105,7 @@ def main():
         # Generate reports
         print("\n📊 SIMULATION COMPLETE! GENERATING REPORTS...")
         generate_reports(full_results, results_dir, enable_failure_injection, derailment_probability)
+        generate_enhanced_reports(full_results, results_dir, enable_failure_injection, derailment_probability)
 
         # Performance metrics
         duration = time.time() - start_time
@@ -202,7 +206,7 @@ def generate_reports(full_results, results_dir, failure_injection_enabled, derai
         f.write("FAILURE INJECTION ANALYSIS\n")
         f.write("=" * 50 + "\n")
         f.write(f"Failure Types: Ignored Reviewer Input + Task Derailment\n")
-        f.write(f"Ignore Feedback Probability: 30%\n")
+        f.write(f"Ignore Feedback Probability: 0%\n")
         f.write(f"Task Derailment Probability: {derailment_probability}\n")
         f.write(f"Total Tasks: {len(full_results)}\n")
         f.write(f"Total Subtasks: {len(df_subtasks)}\n")
@@ -316,6 +320,26 @@ def validate_span_coverage(full_results):
     validation["coverage_rate"] = validation["complete_coverage"] / len(full_results)
     return validation
 
+
+def generate_enhanced_reports(full_results, results_dir, enable_failure_injection, derailment_probability):
+    # ... your existing report generation code ...
+
+    # NEW: Run comprehensive failure metrics analysis
+    if enable_failure_injection:
+        print("\n📊 RUNNING ADVANCED FAILURE METRICS ANALYSIS...")
+        results_file = f"{results_dir}/full_results.jsonl"
+        metrics_report = run_metrics_analysis(results_file, results_dir)
+
+        # Add metrics to validation report
+        with open(f"{results_dir}/validation_report.txt", "a") as f:
+            f.write("\nADVANCED FAILURE METRICS:\n")
+            f.write("=" * 30 + "\n")
+            f.write(f"Failure Detection Rate: {metrics_report['failure_detection']['detection_rate']:.1%}\n")
+            f.write(
+                f"Derailment Impact: {metrics_report['impact_magnitude']['derailment_drop_pct']:.1f}% quality drop\n")
+            f.write(f"Feedback Impact: {metrics_report['impact_magnitude']['feedback_drop_pct']:.1f}% quality drop\n")
+            f.write(f"Reviewer Blindspot Rate: {metrics_report['reviewer_blindspots']['blindspot_rate']:.1%}\n")
+            f.write(f"Avg Propagation: {metrics_report['propagation_distance']['avg_affected_steps']:.1f} steps\n")
 
 if __name__ == "__main__":
     main()

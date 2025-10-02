@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from datetime import datetime
 from .trace_parser import load_trace_data, compute_agent_interactions
-from .visualizations import (
+from .workflow_visualizer import (
     plot_misalignment_clusters,
     plot_error_propagation,
     plot_agent_sankey,

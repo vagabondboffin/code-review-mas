@@ -5,7 +5,7 @@ import random
 
 
 class CoderAgent:
-    def __init__(self, unique_id, model, ignore_feedback_probability=0.7):
+    def __init__(self, unique_id, model, ignore_feedback_probability=0.4):
         self.unique_id = unique_id
         self.model = model
         self.role = "Coder"
